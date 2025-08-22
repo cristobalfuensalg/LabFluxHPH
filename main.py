@@ -1,12 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 import pdfplumber, io, re, datetime, tempfile, os, traceback, base64
 from docxtpl import DocxTemplate
 
 API_KEY = os.getenv("API_KEY", "")  # opcional: setea en Render para proteger la API
 
 app = FastAPI(title="LabFluxHPH Backend")
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -345,56 +347,123 @@ def index():
 <meta charset="utf-8">
 <title>LabFluxHPH</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#f3f6fb;--card:#ffffff;--text:#0f172a;--muted:#6b7280;
-    --brand:#0d6efd;--brand-2:#0b5ed7;--ok:#0a8754;--err:#c62828;
-    --border:#e5e7eb
+  :root {
+    --bg: #f4f4f5;
+    --text: #111827;
+    --muted: #6b7280;
+    --primary: #1d4ed8;
+    --primary-dark: #1e40af;
+    --danger: #dc2626;
+    --success: #059669;
+    --card: #fff;
+    --border: #e5e7eb;
   }
-  *{box-sizing:border-box}
-  body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:var(--bg);color:var(--text)}
-  .wrap{max-width:960px;margin:40px auto;padding:0 20px}
-  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:26px;box-shadow:0 4px 12px rgba(0,0,0,.04)}
-  h1{margin:0 0 6px;font-size:26px;letter-spacing:.2px}
-  .sub{color:var(--muted);margin:0 0 18px}
-  .u-row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
-  .drop{flex:1;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;padding:18px;text-align:center;transition:.2s}
-  .drop.drag{background:#eef6ff;border-color:#93c5fd}
-  .drop input{display:none}
-  .drop .hint{color:var(--muted);font-size:14px;margin-top:6px}
-  .btns{display:flex;gap:10px;align-items:center}
-  button{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:12px 18px;cursor:pointer;font-weight:600}
-  button:hover{background:var(--brand-2)}
-  button[disabled]{opacity:.6;cursor:not-allowed}
-  .files{margin-top:10px;font-size:14px;color:var(--muted)}
-  .status{margin-top:14px;font-size:14px}
-  .ok{color:var(--ok)}
-  .err{color:var(--err);white-space:pre-wrap}
-  .pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:4px 10px;font-size:12px;margin:4px 6px 0 0}
+  body {
+    font-family: 'Inter', sans-serif;
+    margin: 0;
+    padding: 0;
+    background-color: var(--bg);
+    color: var(--text);
+  }
+  .container {
+    max-width: 800px;
+    margin: 40px auto;
+    background: var(--card);
+    padding: 24px;
+    border-radius: 16px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+    border: 1px solid var(--border);
+  }
+  h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  p.sub {
+    color: var(--muted);
+    margin-bottom: 24px;
+  }
+  .upload-area {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    background: #f9fafb;
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .upload-area.drag {
+    background: #eff6ff;
+    border-color: #93c5fd;
+  }
+  input[type="file"] {
+    display: none;
+  }
+  .buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 16px;
+  }
+  button {
+    background-color: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button:hover {
+    background-color: var(--primary-dark);
+  }
+  button.secondary {
+    background-color: #6b7280;
+  }
+  .status {
+    margin-top: 16px;
+    font-size: 14px;
+  }
+  .status.ok { color: var(--success); }
+  .status.err { color: var(--danger); white-space: pre-wrap; }
+  .file-list {
+    margin-top: 12px;
+    font-size: 14px;
+    color: var(--muted);
+  }
+  .tag {
+    background: #e0e7ff;
+    color: #1e3a8a;
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 12px;
+    margin: 4px;
+    display: inline-block;
+  }
 </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <h1>LabFluxHPH</h1>
-      <p class="sub">Sube 1 o más PDFs de laboratorio y recibe el flujograma listo.</p>
+<div class="container">
+  <h1 style="display: flex; align-items: center; gap: 10px;">
+  LabFluxHPH
+  <img src="/static/gatosaludando.gif" alt="logo" style="height: 36px;">
+</h1>
+  <p class="sub">Sube tus archivos de laboratorio (PDF o ZIP) para generar el flujograma automáticamente.</p>
 
-      <div class="u-row">
-        <label id="drop" class="drop">
-          <input id="fileInput" type="file" name="files" multiple accept=".pdf,.zip" />
-          <div><strong>Arrastra aquí tus archivos</strong> o haz clic para buscarlos</div>
-          <div class="hint">Acepta PDFs o un ZIP con PDFs</div>
-          <div id="fileList" class="files"></div>
-        </label>
-        <div class="btns">
-          <button id="btn">Generar flujograma</button>
-          <button id="clearBtn" type="button" style="background:#64748b">Limpiar</button>
-        </div>
-      </div>
+  <label id="drop" class="upload-area">
+    <input id="fileInput" type="file" name="files" multiple accept=".pdf,.zip">
+    <div><strong>Arrastra aquí los archivos</strong> o haz clic para seleccionarlos</div>
+    <div class="file-list" id="fileList"></div>
+  </label>
 
-      <div id="status" class="status"></div>
-    </div>
+  <div class="buttons">
+    <button id="btn">Generar</button>
+    <button id="clearBtn" class="secondary">Limpiar</button>
   </div>
+
+  <div id="status" class="status"></div>
+</div>
 
 <script>
 const drop = document.getElementById('drop');
@@ -405,70 +474,64 @@ const clearBtn = document.getElementById('clearBtn');
 const statusBox = document.getElementById('status');
 
 function renderFiles() {
-  if (!input.files || !input.files.length) {
-    fileList.innerHTML = '';
-    return;
-  }
-  fileList.innerHTML = Array.from(input.files).map(f => {
-    const kb = Math.round((f.size/1024)*10)/10;
-    return '<span class="pill">'+ f.name + ' · ' + kb + ' KB</span>';
-  }).join('');
+  fileList.innerHTML = input.files.length
+    ? Array.from(input.files).map(f => {
+        const kb = Math.round((f.size / 1024) * 10) / 10;
+        return `<span class="tag">${f.name} · ${kb} KB</span>`;
+      }).join('')
+    : '';
 }
 
 drop.addEventListener('click', () => input.click());
-
-drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragover', e => {
+  e.preventDefault();
+  drop.classList.add('drag');
+});
 drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
-drop.addEventListener('drop', (e) => {
+drop.addEventListener('drop', e => {
   e.preventDefault();
   drop.classList.remove('drag');
-  if (e.dataTransfer.files && e.dataTransfer.files.length) {
+  if (e.dataTransfer.files.length) {
     input.files = e.dataTransfer.files;
     renderFiles();
   }
 });
-
 input.addEventListener('change', renderFiles);
-clearBtn.addEventListener('click', () => { input.value=''; renderFiles(); statusBox.innerHTML=''; });
+clearBtn.addEventListener('click', () => {
+  input.value = '';
+  renderFiles();
+  statusBox.innerHTML = '';
+});
 
-async function generate() {
-  const files = input.files;
-  if (!files || !files.length) {
-    statusBox.innerHTML = '<span class="err">⚠️ Selecciona uno o más archivos.</span>';
+btn.addEventListener('click', async () => {
+  if (!input.files.length) {
+    statusBox.innerHTML = '<span class="err">⚠️ Selecciona al menos un archivo.</span>';
     return;
   }
   btn.disabled = true;
   statusBox.innerHTML = '⏳ Procesando...';
 
   const fd = new FormData();
-  for (const f of files) fd.append('files', f);
+  Array.from(input.files).forEach(f => fd.append('files', f));
 
   try {
     const res = await fetch('/generate', { method: 'POST', body: fd });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(txt || ('HTTP ' + res.status));
-    }
+    if (!res.ok) throw new Error(await res.text());
     const cd = res.headers.get('Content-Disposition') || '';
-    const m = /filename=\"?([^\";]+)\"?/i.exec(cd);
-    const fname = m ? m[1] : 'LabFluxHPH.pdf';
-
+    const fname = /filename="?([^";]+)"?/.exec(cd)?.[1] || 'LabFluxHPH.docx';
     const blob = await res.blob();
-    const url = window.URL.createObjectURL(blob);
+    const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = fname;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    window.URL.revokeObjectURL(url);
-    statusBox.innerHTML = '<span class="ok">✅ Flujograma generado. Revisa tu descarga.</span>';
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    statusBox.innerHTML = '<span class="ok">✅ Flujograma generado.</span>';
   } catch (e) {
-    statusBox.innerHTML = '<span class="err">❌ Error:\\n' + (e.message || e) + '</span>';
+    statusBox.innerHTML = '<span class="err">❌ Error:\n' + (e.message || e) + '</span>';
   } finally {
     btn.disabled = false;
   }
-}
-btn.addEventListener('click', generate);
+});
 </script>
 </body>
 </html>
@@ -489,14 +552,10 @@ async def generate(files: list[UploadFile] = File(...)):
     ctx = build_context(all_rows)
     docx_bytes = render_docx(ctx)
 
-    pdf_bytes = convert_docx_to_pdf(docx_bytes)
-    if not pdf_bytes:
-        raise HTTPException(500, "No se pudo convertir a PDF. Asegura LibreOffice instalado en el servidor.")
-
     return StreamingResponse(
-        io.BytesIO(pdf_bytes),
-        media_type="application/pdf",
-        headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.pdf"'}
+        io.BytesIO(docx_bytes),
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.docx"'}
     )
 
     # Fallback a DOCX si no hay conversión disponible
@@ -521,16 +580,12 @@ async def generate_json(files: list[UploadFile] = File(...)):
     ctx = build_context(all_rows)
     docx_bytes = render_docx(ctx)
 
-    pdf_bytes = convert_docx_to_pdf(docx_bytes)
-    if not pdf_bytes:
-        raise HTTPException(500, "No se pudo convertir a PDF. Asegura LibreOffice instalado en el servidor.")
-
-    data_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    data_b64 = base64.b64encode(docx_bytes).decode("ascii")
     return {
-        "filename": "LabFluxHPH.pdf",
-        "mime": "application/pdf",
+        "filename": "LabFluxHPH.docx",
+        "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "data_base64": data_b64,
-        "notes": "OK (PDF)"
+        "notes": "OK (DOCX)"
     }
 
     # Fallback a DOCX si no hay conversión disponible
