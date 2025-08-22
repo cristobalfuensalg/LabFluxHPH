@@ -340,7 +340,139 @@ def build_context(all_rows):
 
 @app.get("/", response_class=HTMLResponse)
 def index():
-    return """
+    return """<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LabFluxHPH – Interfaz Mejorada</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Poppins', sans-serif; }
+  </style>
+</head>
+<body class="bg-gray-100">
+  <!-- Barra superior azul con título y GIFs -->
+  <header class="bg-blue-900 text-white py-4 flex items-center justify-center gap-6">
+    <img src="/static/gatosaludando.gif" alt="decorativo izquierda" class="h-16 w-16">
+    <h1 class="text-4xl font-bold">LabFluxHPH</h1>
+    <img src="/static/gatosaludando.gif" alt="decorativo derecha" class="h-16 w-16">
+  </header>
+
+  <!-- Contenedor principal -->
+  <div class="max-w-xl mx-auto mt-8 p-6 bg-white rounded-2xl shadow-lg transition-all">
+    <p class="text-gray-700 text-center mb-6">
+      Sube 1 o más PDFs con resultados de laboratorio y recibe tu flujograma listo.
+    </p>
+
+    <label id="dropzone"
+      class="block border-2 border-dashed border-gray-400 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-600 transition-all duration-300">
+      <div class="text-blue-400 text-5xl mb-4">📄</div>
+      <div class="text-gray-600 font-semibold">Arrastra archivos aquí o haz clic para seleccionarlos</div>
+      <input type="file" multiple accept=".pdf,.zip" class="hidden">
+    </label>
+
+    <div id="fileList" class="mt-4 flex flex-wrap gap-2"></div>
+
+    <div class="mt-6 text-center">
+      <div id="status" class="text-gray-700 mb-4 relative h-8"></div>
+      <div class="flex justify-center space-x-4">
+        <button id="generateBtn"
+          class="bg-blue-900 text-white px-6 py-2 rounded-2xl font-medium hover:bg-blue-800 transition-all duration-200">
+          Generar flujograma
+        </button>
+        <button id="clearBtn"
+          class="bg-gray-500 text-white px-6 py-2 rounded-2xl font-medium hover:bg-gray-400 transition-all duration-200">
+          Limpiar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = dropzone.querySelector('input[type="file"]');
+    const fileList = document.getElementById('fileList');
+    const status = document.getElementById('status');
+    const generateBtn = document.getElementById('generateBtn');
+    const clearBtn = document.getElementById('clearBtn');
+
+    function renderFiles() {
+      fileList.innerHTML = '';
+      Array.from(fileInput.files).forEach(file => {
+        const div = document.createElement('div');
+        div.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm';
+        div.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
+        fileList.appendChild(div);
+      });
+    }
+
+    function setSpinner(show) {
+      status.innerHTML = show
+        ? '<img src="/static/loading.gif" alt="Cargando..." class="mx-auto h-8">'
+        : '';
+    }
+
+    dropzone.addEventListener('click', () => fileInput.click());
+    dropzone.addEventListener('dragover', e => {
+      e.preventDefault();
+      dropzone.classList.add('border-blue-600');
+    });
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-blue-600'));
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault();
+      dropzone.classList.remove('border-blue-600');
+      fileInput.files = e.dataTransfer.files;
+      renderFiles();
+    });
+
+    fileInput.addEventListener('change', renderFiles);
+
+    clearBtn.addEventListener('click', () => {
+      fileInput.value = '';
+      fileList.innerHTML = '';
+      status.innerHTML = '';
+    });
+
+    generateBtn.addEventListener('click', async () => {
+      if (!fileInput.files.length) {
+        status.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo.</span>';
+        return;
+      }
+
+      setSpinner(true);
+      status.innerHTML = '';
+
+      const fd = new FormData();
+      Array.from(fileInput.files).forEach(f => fd.append('files', f));
+
+      try {
+        const res = await fetch('/generate', { method: 'POST', body: fd });
+        if (!res.ok) throw new Error(await res.text());
+        const blob = await res.blob();
+        const cd = res.headers.get('Content-Disposition') || '';
+        const name = /filename="?([^";]+)"?/.exec(cd)?.[1] || 'LabFluxHPH.docx';
+
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        status.innerHTML = '<span class="text-green-600">Flujograma generado. Revisa tu descarga.</span>';
+      } catch (error) {
+        status.innerHTML = `<span class="text-red-500">❌ ${error.message}</span>`;
+      } finally {
+        setSpinner(false);
+      }
+    });
+  </script>
+</body>
+</html>
+"""
 <!doctype html>
 <html lang="es">
 <head>
