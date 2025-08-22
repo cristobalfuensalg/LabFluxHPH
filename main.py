@@ -253,8 +253,10 @@ def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
 
     # 2) LibreOffice (Windows o Linux)
     possible_paths = [
-        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",  # Windows
+        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",   # Windows
         "/usr/bin/soffice",                                       # Linux (Render)
+        "/usr/lib/libreoffice/program/soffice",                   # Otra ruta Linux
+        "/snap/bin/libreoffice",                                  # Instalación vía Snap
     ]
     for soffice in possible_paths:
         if os.path.exists(soffice):
@@ -344,22 +346,31 @@ def index():
 <title>LabFluxHPH</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-  :root{--bg:#f6f8fb;--card:#ffffff;--text:#1b1f24;--sub:#6c757d;--brand:#0d6efd;--ok:#0a8754;--err:#c62828}
+  :root{
+    --bg:#f3f6fb;--card:#ffffff;--text:#0f172a;--muted:#6b7280;
+    --brand:#0d6efd;--brand-2:#0b5ed7;--ok:#0a8754;--err:#c62828;
+    --border:#e5e7eb
+  }
   *{box-sizing:border-box}
-  body{font-family:system-ui,Segoe UI,Roboto,Arial;margin:0;background:var(--bg);color:var(--text)}
-  .wrap{max-width:880px;margin:40px auto;padding:0 16px}
-  .card{background:var(--card);border:1px solid #e8e8e8;border-radius:14px;padding:22px 22px 26px}
-  h1{margin:0 0 8px;font-size:24px}
-  .sub{color:var(--sub);margin:0 0 18px}
-  .row{display:flex;gap:12px;align-items:center}
-  .file{flex:1;border:1px dashed #cfd8dc;border-radius:10px;padding:14px;background:#fafbff}
-  input[type=file]{width:100%}
-  .actions{margin-top:14px}
-  button{background:var(--brand);color:#fff;border:0;border-radius:8px;padding:10px 16px;cursor:pointer}
-  button[disabled]{opacity:.5;cursor:not-allowed}
+  body{font-family:Inter,system-ui,Segoe UI,Roboto,Arial;margin:0;background:var(--bg);color:var(--text)}
+  .wrap{max-width:960px;margin:40px auto;padding:0 20px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:26px;box-shadow:0 4px 12px rgba(0,0,0,.04)}
+  h1{margin:0 0 6px;font-size:26px;letter-spacing:.2px}
+  .sub{color:var(--muted);margin:0 0 18px}
+  .u-row{display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap}
+  .drop{flex:1;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;padding:18px;text-align:center;transition:.2s}
+  .drop.drag{background:#eef6ff;border-color:#93c5fd}
+  .drop input{display:none}
+  .drop .hint{color:var(--muted);font-size:14px;margin-top:6px}
+  .btns{display:flex;gap:10px;align-items:center}
+  button{background:var(--brand);color:#fff;border:0;border-radius:10px;padding:12px 18px;cursor:pointer;font-weight:600}
+  button:hover{background:var(--brand-2)}
+  button[disabled]{opacity:.6;cursor:not-allowed}
+  .files{margin-top:10px;font-size:14px;color:var(--muted)}
   .status{margin-top:14px;font-size:14px}
   .ok{color:var(--ok)}
   .err{color:var(--err);white-space:pre-wrap}
+  .pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:4px 10px;font-size:12px;margin:4px 6px 0 0}
 </style>
 </head>
 <body>
@@ -368,12 +379,16 @@ def index():
       <h1>LabFluxHPH</h1>
       <p class="sub">Sube 1 o más PDFs de laboratorio y recibe el flujograma listo.</p>
 
-      <div class="row">
-        <div class="file">
-          <input id="files" type="file" name="files" multiple accept=".pdf,.zip"/>
-        </div>
-        <div class="actions">
+      <div class="u-row">
+        <label id="drop" class="drop">
+          <input id="fileInput" type="file" name="files" multiple accept=".pdf,.zip" />
+          <div><strong>Arrastra aquí tus archivos</strong> o haz clic para buscarlos</div>
+          <div class="hint">Acepta PDFs o un ZIP con PDFs</div>
+          <div id="fileList" class="files"></div>
+        </label>
+        <div class="btns">
           <button id="btn">Generar flujograma</button>
+          <button id="clearBtn" type="button" style="background:#64748b">Limpiar</button>
         </div>
       </div>
 
@@ -382,12 +397,42 @@ def index():
   </div>
 
 <script>
+const drop = document.getElementById('drop');
+const input = document.getElementById('fileInput');
+const fileList = document.getElementById('fileList');
 const btn = document.getElementById('btn');
-const filesInput = document.getElementById('files');
+const clearBtn = document.getElementById('clearBtn');
 const statusBox = document.getElementById('status');
 
+function renderFiles() {
+  if (!input.files || !input.files.length) {
+    fileList.innerHTML = '';
+    return;
+  }
+  fileList.innerHTML = Array.from(input.files).map(f => {
+    const kb = Math.round((f.size/1024)*10)/10;
+    return '<span class="pill">'+ f.name + ' · ' + kb + ' KB</span>';
+  }).join('');
+}
+
+drop.addEventListener('click', () => input.click());
+
+drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('drag'); });
+drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+drop.addEventListener('drop', (e) => {
+  e.preventDefault();
+  drop.classList.remove('drag');
+  if (e.dataTransfer.files && e.dataTransfer.files.length) {
+    input.files = e.dataTransfer.files;
+    renderFiles();
+  }
+});
+
+input.addEventListener('change', renderFiles);
+clearBtn.addEventListener('click', () => { input.value=''; renderFiles(); statusBox.innerHTML=''; });
+
 async function generate() {
-  const files = filesInput.files;
+  const files = input.files;
   if (!files || !files.length) {
     statusBox.innerHTML = '<span class="err">⚠️ Selecciona uno o más archivos.</span>';
     return;
@@ -423,7 +468,6 @@ async function generate() {
     btn.disabled = false;
   }
 }
-
 btn.addEventListener('click', generate);
 </script>
 </body>
@@ -446,12 +490,14 @@ async def generate(files: list[UploadFile] = File(...)):
     docx_bytes = render_docx(ctx)
 
     pdf_bytes = convert_docx_to_pdf(docx_bytes)
-    if pdf_bytes:
-        return StreamingResponse(
-            io.BytesIO(pdf_bytes),
-            media_type="application/pdf",
-            headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.pdf"'}
-        )
+    if not pdf_bytes:
+        raise HTTPException(500, "No se pudo convertir a PDF. Asegura LibreOffice instalado en el servidor.")
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.pdf"'}
+    )
 
     # Fallback a DOCX si no hay conversión disponible
     return StreamingResponse(
@@ -476,14 +522,16 @@ async def generate_json(files: list[UploadFile] = File(...)):
     docx_bytes = render_docx(ctx)
 
     pdf_bytes = convert_docx_to_pdf(docx_bytes)
-    if pdf_bytes:
-        data_b64 = base64.b64encode(pdf_bytes).decode("ascii")
-        return {
-            "filename": "LabFluxHPH.pdf",
-            "mime": "application/pdf",
-            "data_base64": data_b64,
-            "notes": "OK (PDF)"
-        }
+    if not pdf_bytes:
+        raise HTTPException(500, "No se pudo convertir a PDF. Asegura LibreOffice instalado en el servidor.")
+
+    data_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    return {
+        "filename": "LabFluxHPH.pdf",
+        "mime": "application/pdf",
+        "data_base64": data_b64,
+        "notes": "OK (PDF)"
+    }
 
     # Fallback a DOCX si no hay conversión disponible
     data_b64 = base64.b64encode(docx_bytes).decode("ascii")
