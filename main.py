@@ -370,13 +370,20 @@ def index():
       class="block border-2 border-dashed border-gray-400 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-600 transition-all duration-300">
       <div class="text-blue-400 text-5xl mb-4">📄</div>
       <div class="text-gray-600 font-semibold">Arrastra archivos aquí o haz clic para seleccionarlos</div>
-      <input type="file" multiple accept=".pdf,.zip" class="hidden">
+      <input id="fileInput" type="file" multiple accept=".pdf,.zip" class="hidden">
     </label>
 
     <div id="fileList" class="mt-4 flex flex-wrap gap-2"></div>
 
-    <div class="mt-6 text-center">
-      <div id="status" class="text-gray-700 mb-4 relative h-8"></div>
+    <div class="mt-6 text-center space-y-3">
+      <div id="status" class="text-gray-700 min-h-6"></div>
+
+      <!-- Contenedor de progreso -->
+      <div id="progressWrap" class="w-full bg-gray-200 rounded-full h-3 overflow-hidden hidden">
+        <div id="progressBar" class="bg-blue-600 h-3 w-0 transition-all duration-150"></div>
+      </div>
+      <div id="progressText" class="text-sm text-gray-600 hidden">0%</div>
+
       <div class="flex justify-center space-x-4">
         <button id="generateBtn"
           class="bg-blue-900 text-white px-6 py-2 rounded-2xl font-medium hover:bg-blue-800 transition-all duration-200">
@@ -392,82 +399,179 @@ def index():
 
   <script>
     const dropzone = document.getElementById('dropzone');
-    const fileInput = dropzone.querySelector('input[type="file"]');
+    const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
-    const status = document.getElementById('status');
+    const statusBox = document.getElementById('status');
     const generateBtn = document.getElementById('generateBtn');
     const clearBtn = document.getElementById('clearBtn');
 
+    const progressWrap = document.getElementById('progressWrap');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+
+    let selectedFiles = [];
+
+    function addFiles(fileListLike) {
+      const incoming = Array.from(fileListLike);
+      const valid = incoming.filter(f => /\.pdf$/i.test(f.name) || /\.zip$/i.test(f.name));
+      selectedFiles = selectedFiles.concat(valid);
+      renderFiles();
+    }
+
     function renderFiles() {
       fileList.innerHTML = '';
-      Array.from(fileInput.files).forEach(file => {
-        const div = document.createElement('div');
-        div.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm';
-        div.textContent = `${file.name} · ${(file.size / 1024).toFixed(1)} KB`;
-        fileList.appendChild(div);
+      if (!selectedFiles.length) return;
+      selectedFiles.forEach((file, idx) => {
+        const tag = document.createElement('div');
+        tag.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center gap-2';
+        tag.innerHTML = `${file.name} · ${(file.size/1024).toFixed(1)} KB 
+          <button aria-label="Eliminar" class="ml-1 text-red-600 hover:text-red-800" data-idx="${idx}">✕</button>`;
+        fileList.appendChild(tag);
+      });
+      fileList.querySelectorAll('button[data-idx]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          const i = parseInt(e.currentTarget.getAttribute('data-idx'), 10);
+          selectedFiles.splice(i, 1);
+          renderFiles();
+        });
       });
     }
 
-    function setSpinner(show) {
-      status.innerHTML = show
-        ? '<img src="/static/loading.gif" alt="Cargando..." class="mx-auto h-8">'
-        : '';
+    function clearAll() {
+      selectedFiles = [];
+      fileInput.value = '';
+      fileList.innerHTML = '';
+      statusBox.innerHTML = '';
+      hideProgress();
     }
 
+    function showSpinner() {
+      // Añade el GIF sin borrar otros mensajes
+      const exists = document.getElementById('spinner');
+      if (!exists) {
+        const img = document.createElement('img');
+        img.src = '/static/loading.gif';
+        img.alt = 'Cargando...';
+        img.className = 'mx-auto h-8';
+        img.id = 'spinner';
+        statusBox.appendChild(img);
+      }
+    }
+    function hideSpinner() {
+      const img = document.getElementById('spinner');
+      if (img) img.remove();
+    }
+
+    function showProgress() {
+      progressWrap.classList.remove('hidden');
+      progressText.classList.remove('hidden');
+      progressBar.style.width = '0%';
+      progressText.textContent = '0%';
+    }
+    function updateProgress(percent) {
+      const p = Math.max(0, Math.min(100, Math.round(percent)));
+      progressBar.style.width = p + '%';
+      progressText.textContent = p + '%';
+    }
+    function hideProgress() {
+      progressWrap.classList.add('hidden');
+      progressText.classList.add('hidden');
+      progressBar.style.width = '0%';
+      progressText.textContent = '0%';
+    }
+
+    // Click y drag&drop
     dropzone.addEventListener('click', () => fileInput.click());
-    dropzone.addEventListener('dragover', e => {
+    dropzone.addEventListener('dragover', (e) => {
       e.preventDefault();
       dropzone.classList.add('border-blue-600');
     });
     dropzone.addEventListener('dragleave', () => dropzone.classList.remove('border-blue-600'));
-    dropzone.addEventListener('drop', e => {
+    dropzone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropzone.classList.remove('border-blue-600');
-      fileInput.files = e.dataTransfer.files;
-      renderFiles();
+      if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+    });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files?.length) addFiles(e.target.files);
     });
 
-    fileInput.addEventListener('change', renderFiles);
+    clearBtn.addEventListener('click', clearAll);
 
-    clearBtn.addEventListener('click', () => {
-      fileInput.value = '';
-      fileList.innerHTML = '';
-      status.innerHTML = '';
-    });
-
+    // Enviar con progreso real (XHR permite onprogress)
     generateBtn.addEventListener('click', async () => {
-      if (!fileInput.files.length) {
-        status.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo.</span>';
+      if (!selectedFiles.length) {
+        statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
         return;
       }
 
-      setSpinner(true);
-      status.innerHTML = '';
+      // UI bloqueada + feedback
+      generateBtn.disabled = true;
+      generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
+      showSpinner();
+      showProgress();
 
       const fd = new FormData();
-      Array.from(fileInput.files).forEach(f => fd.append('files', f));
+      selectedFiles.forEach(f => fd.append('files', f));
 
-      try {
-        const res = await fetch('/generate', { method: 'POST', body: fd });
-        if (!res.ok) throw new Error(await res.text());
-        const blob = await res.blob();
-        const cd = res.headers.get('Content-Disposition') || '';
-        const name = /filename="?([^";]+)"?/.exec(cd)?.[1] || 'LabFluxHPH.docx';
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/generate', true);
+      xhr.responseType = 'blob';
 
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url; a.download = name;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+      // Si usas API key:
+      // xhr.setRequestHeader('x-api-key', 'TU_API_KEY');
 
-        status.innerHTML = '<span class="text-green-600">Flujograma generado. Revisa tu descarga.</span>';
-      } catch (error) {
-        status.innerHTML = `<span class="text-red-500">❌ ${error.message}</span>`;
-      } finally {
-        setSpinner(false);
-      }
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          const percent = (e.loaded / e.total) * 100;
+          updateProgress(percent);
+        }
+      };
+
+      xhr.onload = () => {
+        hideSpinner();
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          // Descarga automática
+          const blob = xhr.response;
+          // Intentar extraer nombre del header si estuviera disponible (no accesible directo con XHR cross env),
+          // usamos nombre por defecto:
+          const fname = 'LabFluxHPH.docx';
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = fname;
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+
+          statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
+        } else {
+          // Intentar leer mensaje de error como texto
+          let msg = 'Error de servidor';
+          try {
+            const reader = new FileReader();
+            reader.onload = () => {
+              statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
+            };
+            reader.readAsText(xhr.response);
+          } catch {
+            statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
+          }
+        }
+        // Ocultar barra tras un momento
+        setTimeout(hideProgress, 500);
+      };
+
+      xhr.onerror = () => {
+        hideSpinner();
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
+        hideProgress();
+      };
+
+      xhr.send(fd);
     });
   </script>
 </body>
