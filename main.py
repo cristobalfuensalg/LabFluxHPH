@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import pdfplumber, io, re, datetime, tempfile, os, traceback
 from docxtpl import DocxTemplate
-import base64  # ✅ Paso 1: faltaba este import para /generate_json
+import base64
 
 API_KEY = os.getenv("API_KEY", "")
 
@@ -31,6 +31,9 @@ async def all_exception_handler(request, exc):
     tb = traceback.format_exc()
     return PlainTextResponse(tb, status_code=500)
 
+# -----------------------
+# Config de parámetros
+# -----------------------
 PARAMS_FIJOS = [
     "hto", "hb", "vcm", "hcm", "leuco", "neu", "linfocitos", "mono", "eosin", "basofilos",
     "plaq", "vhs", "glucosa", "glicada", "coltotal", "hdl", "ldl", "tgl", "bun", "crea", "buncrea", "vfg",
@@ -40,16 +43,28 @@ PARAMS_FIJOS = [
     "ldh", "ck", "ckmb", "tropo", "vitd", "vitb",
     "sodio", "potasio", "cloro", "ph", "pcodos", "podos", "bicarb", "base",
     "tp", "inr", "ttpk",
+    # Orina completa
     "coloroc", "aspectooc", "densoc", "phoc", "nitritosoc", "protoc", "cetonasoc",
     "glucosaoc", "urobiloc", "bilioc", "mucusoc", "leucosoc", "groc", "bactoc",
     "hialoc", "granuloc", "epiteloc", "cristaloc", "levadoc",
+    # Cultivo (placeholders específicos)
     "fechacul", "horacul", "fechaposcul", "horaposcul", "muestra", "gram", "agente", "ATB"
 ]
 
-# Paso 2 (próximo): detección por panel por página. Por ahora dejamos los marcadores tal como están.
+# -----------------------
+# Detección de panel por página
+# -----------------------
 SECTION_MARKERS = {
-    "oc": [r"ORINA\s+COMPLETA\s*\(Incluye\s*SED\.U\)"],
-    "cultivo": [r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b", r"\bANTIBIOGRAMA\b", r"\bGRAM\b"],
+    "oc": [
+        r"ORINA\s+COMPLETA",
+        r"\bSED\.?U\b",
+        r"\bUROAN[ÁA]LISIS\b",
+        r"\bEXAMEN\s+DE\s+ORINA\b",
+    ],
+    "cultivo": [
+        r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b",
+        r"\bANTIBIOGRAMA\b", r"\bTINCION\s+DE\s+GRAM\b", r"\bGRAM\b"
+    ],
     "resto": []
 }
 
@@ -60,20 +75,23 @@ ALIAS_BY_PANEL = {
         r"^VCM$": "vcm",
         r"^HCM$": "hcm",
         r"^RCTO DE LEUCOCITOS$": "leuco",
+        r"^LEUCOCITOS$": "leuco",
         r"^NEUTR[ÓO]FILOS$": "neu",
         r"^LINFOCITOS$": "linfocitos",
         r"^MONOCITOS$": "mono",
         r"^EOSIN[ÓO]FILOS$": "eosin",
         r"^BAS[ÓO]FILOS$": "basofilos",
         r"^RCTO DE PLAQUETAS$": "plaq",
+        r"^PLAQUETAS$": "plaq",
         r"^VHS$": "vhs",
         r"^GLUCOSA$": "glucosa",
         r"^HEMOGLOBINA GLICOSILADA %$": "glicada",
         r"^COLESTEROL TOTAL$": "coltotal",
         r"^COLESTEROL HDL$": "hdl",
-        r"^COLESTEROL LDL$": "ldl",  # ✅ agregado
+        r"^COLESTEROL LDL$": "ldl",
         r"^TRIGLIC[ÉE]RIDOS$": "tgl",
         r"^BUN$": "bun",
+        r"^UREA$": "bun",
         r"^CREATININA$": "crea",
         r"^F[ÓO]SFORO$": "fosforo",
         r"^MAGNESIO$": "magnesio",
@@ -105,6 +123,7 @@ ALIAS_BY_PANEL = {
         r"^P O2$": "podos",
         r"^HCO3$": "bicarb",
         r"^EBVT$": "base",        # Base Excess
+        r"^EXCESO DE BASE$": "base",
         r"^PORCENTAJE$": "tp",
         r"^INR$": "inr",
         r"^TTPA$": "ttpk",
@@ -134,18 +153,36 @@ ALIAS_BY_PANEL = {
         r"^TINCION DE GRAM$": "gram",
         r"^ANTIBIOGRAMA$": "ATB",
         r"^MICROORGANISMO$": "agente",
+        r"^MUESTRA:?$": "muestra",
         r"^Muestra:$": "muestra",
     }
 }
 
-def detect_panel(text: str) -> str:
+# -----------------------
+# Utilidades
+# -----------------------
+def detect_panel_page(text: str) -> str:
+    """Detecta el panel de una página por marcadores y, si no, por heurísticas."""
     for panel, pats in SECTION_MARKERS.items():
         for pat in pats:
             if re.search(pat, text, flags=re.I):
                 return panel
+    # Heurística secundaria
+    text_low = text.lower()
+    oc_hits = any(k in text_low for k in [
+        "orina completa", "sed.u", "sed u", "uroan", "urobil", "cilindros", "bacterias", "leucocitos en orina"
+    ])
+    cultivo_hits = any(k in text_low for k in [
+        "urocultivo", "hemocultivo", "antibiograma", "gram", "tinción de gram", "cultivo"
+    ])
+    if oc_hits and not cultivo_hits:
+        return "oc"
+    if cultivo_hits:
+        return "cultivo"
     return "resto"
 
 def match_alias_in_panel(name: str, panel: str) -> str | None:
+    """Primero intenta alias del panel; si no, cae a 'resto' para términos globales."""
     for pat, std in ALIAS_BY_PANEL.get(panel, {}).items():
         if re.search(pat, name, flags=re.I):
             return std
@@ -155,15 +192,92 @@ def match_alias_in_panel(name: str, panel: str) -> str | None:
                 return std
     return None
 
-def format_value(std: str, value: str) -> str:
+def heuristic_alias(name: str, panel: str) -> str | None:
+    """Heurísticas por 'contains' cuando no hay match exacto."""
+    n = name.lower().strip()
+    if panel == "oc":
+        tests = [
+            ("color", "coloroc"), ("aspect", "aspectooc"), ("densid", "densoc"),
+            (" ph", "phoc"), ("ph ", "phoc"), ("nitrit", "nitritosoc"),
+            ("prote", "protoc"), ("ceton", "cetonasoc"), ("gluco", "glucosaoc"),
+            ("urobil", "urobiloc"), ("bilir", "bilioc"), ("muc", "mucusoc"),
+            ("leuco", "leucosoc"), ("eritro", "groc"), ("globulos rojos", "groc"),
+            ("bacter", "bactoc"), ("hial", "hialoc"), ("granul", "granuloc"),
+            ("epitel", "epiteloc"), ("cristal", "cristaloc"), ("levad", "levadoc")
+        ]
+        for sub, std in tests:
+            if sub in n:
+                return std
+        return None
+    if panel == "cultivo":
+        tests = [
+            ("gram", "gram"), ("antibio", "ATB"),
+            ("microorgan", "agente"), ("agente", "agente"),
+            ("muestra", "muestra")
+        ]
+        for sub, std in tests:
+            if sub in n:
+                return std
+        return None
+    # resto
+    tests = [
+        ("hematoc", "hto"), ("hemogl", "hb"), ("vcm", "vcm"), ("hcm", "hcm"),
+        ("leuco", "leuco"), ("neutro", "neu"), ("linfo", "linfocitos"),
+        ("monoc", "mono"), ("eosin", "eosin"), ("baso", "basofilos"),
+        ("plaquet", "plaq"), ("vhs", "vhs"),
+        ("glucosa", "glucosa"), ("glicos", "glicada"),
+        ("colesterol total", "coltotal"), ("hdl", "hdl"), ("ldl", "ldl"),
+        ("triglic", "tgl"), ("urea", "bun"), ("bun", "bun"), ("creatin", "crea"),
+        ("fosforo", "fosforo"), ("magnesio", "magnesio"), ("calcio i", "calcioion"),
+        ("calcio", "calcio"), ("acido urico", "acurico"),
+        ("got", "got"), ("gpt", "gpt"), ("ggt", "ggt"), ("fosfatasa alcalina", "fa"),
+        ("bilirrubina total", "bt"), ("bilirrubina directa", "bd"),
+        ("amilasa", "amilasa"), ("proteina c reactiva", "pcr"), ("proteinas totales", "proteinas"),
+        ("albumin", "albumina"), ("lactico", "lactico"), ("ldh", "ldh"),
+        ("ckmb", "ckmb"), ("creatinquinasa", "ck"), ("troponina", "tropo"),
+        ("vitamina d", "vitd"), ("vitamina b12", "vitb"),
+        ("sodio", "sodio"), ("potasio", "potasio"), ("cloro", "cloro"),
+        (" p co2", "pcodos"), (" p o2", "podos"), ("hco3", "bicarb"),
+        ("exceso de base", "base"), ("ebvt", "base"),
+        ("porcentaje", "tp"), ("inr", "inr"), ("ttpa", "ttpk"),
+        (" ph", "ph"), ("ph ", "ph")
+    ]
+    for sub, std in tests:
+        if sub in n:
+            return std
+    return None
+
+def coalesce_alias(name: str, panel: str) -> str | None:
+    std = match_alias_in_panel(name, panel)
+    if std:
+        return std
+    return heuristic_alias(name, panel)
+
+def extract_numeric_head(s: str) -> str:
+    """Obtiene el primer número (con coma o punto) de una cadena, o retorna s si no hay número."""
+    m = re.search(r"[-+]?\d+(?:[.,]\d+)?", s)
+    return (m.group(0) if m else s).strip()
+
+def format_value(std: str | None, value: str) -> str:
+    """
+    - leucocitos/plaquetas en miles:
+      * si < 1000 -> multiplica por 1000
+      * si >= 1000 -> deja tal cual
+    - % para dif y TP
+    """
+    if not std:
+        return value
+    # intenta numérico
+    cand = value.replace(",", ".")
     try:
-        val = float(value)
+        val = float(cand)
     except:
         return value
-    if std == "leuco":
-        return str(int(val * 1000))
-    if std == "plaq":
-        return str(int(val * 1000))
+
+    if std in {"leuco", "plaq"}:
+        if val < 1000:
+            return str(int(round(val * 1000)))
+        return str(int(round(val)))
     if std in {"neu", "linfocitos", "mono", "eosin", "basofilos", "tp"}:
         return f"{val:.1f}%"
     return value
@@ -177,6 +291,9 @@ def _extract_dt(dstr: str, tstr: str):
                              int(tstr.split(":")[0]), int(tstr.split(":")[1]))
 
 def parse_recepcion_datetime(text: str):
+    """
+    Busca solo 'Recepción' (evita muestra/ingreso/impresión).
+    """
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     date_re = r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})"
     time_re = r"(\d{1,2}:\d{2})"
@@ -226,8 +343,7 @@ def parse_recepcion_datetime(text: str):
                 except:
                     pass
             around = lines[max(0, i-1):min(len(lines), i+2)]
-            date_found = None
-            time_found = None
+            date_found, time_found = None, None
             for a in around:
                 if not date_found:
                     md = re.search(date_re, a, flags=re.I)
@@ -243,48 +359,82 @@ def parse_recepcion_datetime(text: str):
 
     return None
 
+# -----------------------
+# Parser por página
+# -----------------------
 def parse_pdf(file_bytes: bytes):
     """
-    Paso 1: versión simple (por documento completo).
-    Paso 2: la convertiremos a 'por página' con panel/contexto independiente.
+    Paso 2: parseo por página con panel/contexto independiente, alias por panel + heurísticas,
+    y Fecha/Hora de Recepción por página (cultivo -> genera fechacul/horacul).
     """
     rows = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
-
-    recepcion = parse_recepcion_datetime(text)
-
-    for raw in text.splitlines():
-        line = raw.strip()
-        if not line:
-            continue
-
-        parts = re.split(r"\s{2,}", line)
-        if len(parts) < 2:
-            if ":" in line:
-                parts = [p.strip() for p in line.split(":", 1)]
-            else:
+        for page_index, page in enumerate(pdf.pages):
+            text = page.extract_text() or ""
+            if not text.strip():
                 continue
 
-        name = parts[0].strip()
-        value = parts[1].strip()
+            panel = detect_panel_page(text)
+            recepcion = parse_recepcion_datetime(text)
 
-        value = value.replace(",", ".")
+            # Cultivo: generar placeholders específicos desde la Recepción de esta página
+            if panel == "cultivo" and recepcion:
+                rows.append({
+                    "std": "fechacul",
+                    "nombre": "Fecha Recepción Cultivo",
+                    "valor": recepcion.strftime("%d/%m/%Y"),
+                    "recepcion": recepcion,
+                    "panel": panel,
+                    "page_index": page_index
+                })
+                rows.append({
+                    "std": "horacul",
+                    "nombre": "Hora Recepción Cultivo",
+                    "valor": recepcion.strftime("%H:%M"),
+                    "recepcion": recepcion,
+                    "panel": panel,
+                    "page_index": page_index
+                })
 
-        panel = detect_panel(text)
-        std = match_alias_in_panel(name, panel)
-        value = format_value(std, value)
+            # Recorrer líneas de la página
+            for raw in text.splitlines():
+                line = raw.strip()
+                if not line:
+                    continue
 
-        rows.append({
-            "std": std,
-            "nombre": name,
-            "valor": value,
-            "recepcion": recepcion,
-            "panel": panel
-        })
+                # Separación típica: columnas con 2+ espacios o con ':'
+                parts = re.split(r"\s{2,}", line)
+                if len(parts) < 2:
+                    if ":" in line:
+                        parts = [p.strip() for p in line.split(":", 1)]
+                    else:
+                        continue
+
+                name = parts[0].strip()
+                value = parts[1].strip()
+
+                # Valor: intenta extraer número al inicio si corresponde
+                numeric_candidate = extract_numeric_head(value)
+                # Coalesce alias con prioridad de panel
+                std = coalesce_alias(name, panel)
+
+                # Formato según estándar
+                value_fmt = format_value(std, numeric_candidate if numeric_candidate else value)
+
+                rows.append({
+                    "std": std,
+                    "nombre": name,
+                    "valor": value_fmt,
+                    "recepcion": recepcion,
+                    "panel": panel,
+                    "page_index": page_index
+                })
 
     return rows
 
+# -----------------------
+# DOCX y endpoints
+# -----------------------
 def render_docx(ctx: dict) -> bytes:
     from pathlib import Path
     BASE_DIR = Path(__file__).resolve().parent
@@ -325,19 +475,27 @@ def extract_pdfs_from_uploads(files: list[UploadFile]) -> list[bytes]:
     return pdf_bytes_list
 
 def build_context(all_rows):
-    tandas = {}
+    """
+    Agrupa por tandas según fecha/hora de Recepción (por página).
+    Solo usamos Recepción; sin ella, la fila no se considera en el flujograma.
+    """
+    tandas: dict[str, dict] = {}
     extras_detectados = set()
+
     for r in all_rows:
-        if not r["recepcion"]:
+        rec = r.get("recepcion")
+        if not rec:
             continue
-        key = r["recepcion"].strftime("%Y-%m-%d %H:%M")
+        key = rec.strftime("%Y-%m-%d %H:%M")
         if key not in tandas:
             tandas[key] = {}
-        if r["std"]:
-            tandas[key][r["std"]] = r["valor"]
+        std = r.get("std")
+        if std:
+            tandas[key][std] = r.get("valor", "")
         else:
-            extras_detectados.add(r["nombre"])
+            extras_detectados.add(r.get("nombre", ""))
 
+    # Orden cronológico (máx 8 columnas)
     fechas = sorted(tandas.keys())[:8]
     ctx = {}
     for i, fecha in enumerate(fechas, start=1):
@@ -346,6 +504,8 @@ def build_context(all_rows):
         ctx[f"hora_{i}"] = dt.strftime("%H:%M")
         for param in PARAMS_FIJOS:
             ctx[f"{param}_{i}"] = tandas[fecha].get(param, "")
+
+    # Rellenar columnas vacías restantes
     for i in range(len(fechas) + 1, 9):
         ctx[f"fecha_{i}"] = ""
         ctx[f"hora_{i}"] = ""
@@ -663,6 +823,7 @@ async def generate_json(files: list[UploadFile] = File(...), debug: int = 0):
 
     ctx = build_context(all_rows)
     if debug:
+        # debug enriquecido con page_index y panel
         return {
             "debug": 1,
             "rows": all_rows,
