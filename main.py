@@ -32,70 +32,137 @@ async def all_exception_handler(request, exc):
 
 PARAMS_FIJOS = [
     "hto", "hb", "vcm", "hcm", "leuco", "neu", "linfocitos", "mono", "eosin", "basofilos",
-    "plaq", "vhs", "glucosa", "glicada", "coltotal", "hdl", "tgl", "bun", "crea",
+    "plaq", "vhs", "glucosa", "glicada", "coltotal", "hdl", "ldl", "tgl", "bun", "crea", "buncrea", "vfg", 
     "fosforo", "magnesio", "calcio", "calcioion", "acurico",
     "got", "gpt", "ggt", "fa", "bt", "bd",
-    "amilasa", "proteinas", "albumina", "amonio", "pcr", "lactico",
+    "amilasa", "proteinas", "albumina", "pcr", "lactico",
     "ldh", "ck", "ckmb", "tropo", "vitd", "vitb",
     "sodio", "potasio", "cloro", "ph", "pcodos", "podos", "bicarb", "base",
-    "tp", "inr", "ttpk"
+    "tp", "inr", "ttpk", "coloroc", "aspectooc", "densoc", "phoc", "nitritosoc", "protoc", "cetonasoc",
+    "glucosaoc", "urobiloc", "bilioc", "mucusoc", "leucosoc", "groc", "bactoc",
+    "hialoc", "granuloc", "epiteloc", "cristaloc", "levadoc", "fechacul", "horacul", "fechaposcul", "horaposcul", "muestra",
+    "gram", "agente", "ATB"
 ]
 
-ALIASES = {
-    r"^HEMATOCRITO$": "hto",
-    r"^HEMOGLOBINA$": "hb",
-    r"^VCM$": "vcm",
-    r"^HCM$": "hcm",
-    r"^RCTO DE LEUCOCITOS$": "leuco",
-    r"^NEUTR[ÓO]FILOS$": "neu",
-    r"^LINFOCITOS$": "linfocitos",
-    r"^MONOCITOS$": "mono",
-    r"^EOSIN[ÓO]FILOS$": "eosin",
-    r"^BAS[ÓO]FILOS$": "basofilos",
-    r"^RCTO DE PLAQUETAS$": "plaq",
-    r"^VHS$": "vhs",
-    r"^GLUCOSA$": "glucosa",
-    r"^HEMOGLOBINA GLICOSILADA %$": "glicada",
-    r"^COLESTEROL TOTAL$": "coltotal",
-    r"^COLESTEROL HDL$": "hdl",
-    r"^TRIGLIC[ÉE]RIDOS$": "tgl",
-    r"^BUN$": "bun",
-    r"^CREATININA$": "crea",
-    r"^F[ÓO]SFORO$": "fosforo",
-    r"^MAGNESIO$": "magnesio",
-    r"^CALCIO$": "calcio",
-    r"^CALCIO I[ÓO]NICO$": "calcioion",
-    r"^ÁCIDO [ÚU]RICO$": "acurico",
-    r"^GOT$": "got",
-    r"^GPT$": "gpt",
-    r"^GGT$": "ggt",
-    r"^FOSFATASA ALCALINA$": "fa",
-    r"^BILIRRUBINA TOTAL$": "bt",
-    r"^BILIRRUBINA DIRECTA$": "bd",
-    r"^AMILASA$": "amilasa",
-    r"^PROTE[ÍI]NAS TOTALES$": "proteinas",
-    r"^ALB[ÚU]MINA$": "albumina",
-    r"^AMONIO$": "amonio",
-    r"^PROTE[ÍI]NA C REACTIVA$": "pcr",
-    r"^ÁCIDO L[ÁA]CTICO$": "lactico",
-    r"^LDH$": "ldh",
-    r"^CREATINKINASA TOTAL$": "ck",
-    r"^CREATINKINASA MB$": "ckmb",
-    r"^TROPONINA T.*$": "tropo",
-    r"^NIVELES VITAMINA D$": "vitd",
-    r"^NIVELES VITAMINA B12$": "vitb",
-    r"^SODIO$": "sodio",
-    r"^POTASIO$": "potasio",
-    r"^CLORO$": "cloro",
-    r"^PH$": "ph",
-    r"^P CO2$": "pcodos",
-    r"^P O2$": "podos",
-    r"^HCO3$": "bicarb",
-    r"^EBVT$": "base",
-    r"^PORCENTAJE$": "tp",
-    r"^INR$": "inr",
-    r"^TTPA$": "ttpk"
+SECTION_MARKERS = {
+    "oc": [
+        r"ORINA\s+COMPLETA\s*\(Incluye\s*SED\.U\)"
+    ],
+    "cultivo": [
+        r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b", r"\bANTIBIOGRAMA\b", r"\bGRAM\b"
+    ],
+    "resto": []  # fallback si no matchea oc ni cultivo
 }
+
+# --- Alias por panel ---
+ALIAS_BY_PANEL = {
+    "resto": {
+        r"^HEMATOCRITO$": "hto",
+        r"^HEMOGLOBINA$": "hb",
+        r"^VCM$": "vcm",
+        r"^HCM$": "hcm",
+        r"^RCTO DE LEUCOCITOS$": "leuco",
+        r"^NEUTR[ÓO]FILOS$": "neu",
+        r"^LINFOCITOS$": "linfocitos",
+        r"^MONOCITOS$": "mono",
+        r"^EOSIN[ÓO]FILOS$": "eosin",
+        r"^BAS[ÓO]FILOS$": "basofilos",
+        r"^RCTO DE PLAQUETAS$": "plaq",
+        r"^VHS$": "vhs",
+        r"^GLUCOSA$": "glucosa",
+        r"^HEMOGLOBINA GLICOSILADA %$": "glicada",
+        r"^COLESTEROL TOTAL$": "coltotal",
+        r"^COLESTEROL HDL$": "hdl",
+        r"^TRIGLIC[ÉE]RIDOS$": "tgl",
+        r"^BUN$": "bun",
+        r"^CREATININA$": "crea",
+        r"^F[ÓO]SFORO$": "fosforo",
+        r"^MAGNESIO$": "magnesio",
+        r"^CALCIO$": "calcio",
+        r"^CALCIO I[ÓO]NICO$": "calcioion",
+        r"^ÁCIDO [ÚU]RICO$": "acurico",
+        r"^GOT$": "got",
+        r"^GPT$": "gpt",
+        r"^GGT$": "ggt",
+        r"^FOSFATASA ALCALINA$": "fa",
+        r"^BILIRRUBINA TOTAL$": "bt",
+        r"^BILIRRUBINA DIRECTA$": "bd",
+        r"^AMILASA$": "amilasa",
+        r"^PROTE[ÍI]NAS TOTALES$": "proteinas",
+        r"^ALB[ÚU]MINA$": "albumina",
+        r"^PROTE[ÍI]NA C REACTIVA$": "pcr",
+        r"^ÁCIDO L[ÁA]CTICO$": "lactico",
+        r"^LDH$": "ldh",
+        r"^CREATINKINASA TOTAL$": "ck",
+        r"^CREATINKINASA MB$": "ckmb",
+        r"^TROPONINA T.*$": "tropo",
+        r"^NIVELES VITAMINA D$": "vitd",
+        r"^NIVELES VITAMINA B12$": "vitb",
+        r"^SODIO$": "sodio",
+        r"^POTASIO$": "potasio",
+        r"^CLORO$": "cloro",
+        r"^PH$": "ph",
+        r"^P CO2$": "pcodos",
+        r"^P O2$": "podos",
+        r"^HCO3$": "bicarb",
+        r"^EBVT$": "base",
+        r"^PORCENTAJE$": "tp",
+        r"^INR$": "inr",
+        r"^TTPA$": "ttpk",
+        # aquí irían, si quieres, alias de “glóbulos rojos” del hemograma
+        # r"^(GL[ÓO]BULOS ROJOS|ERITROCITOS)$": "alguno_del_resto"
+    },
+    "oc": {
+        r"^COLOR$": "coloroc",
+        r"^ASPECTO$": "aspectooc",
+        r"^DENSIDAD$": "densoc",
+        r"^PH$": "phoc",
+        r"^NITRITOS$": "nitritosoc",
+        r"^PROTE[IÍ]NAS?$": "protoc",
+        r"^CETONAS$": "cetonasoc",
+        r"^GLUCOSA$": "glucosaoc",
+        r"^UROBILIN[ÓO]GENO$": "urobiloc",
+        r"^BILIRRUBINA$": "bilioc",
+        r"^MUCUS$": "mucusoc",
+        r"^LEUCOCITOS$": "leucosoc",
+        r"^(GL[ÓO]BULOS ROJOS|ERITROCITOS)$": "groc",
+        r"^BACTERIAS$": "bactoc",
+        r"^CILINDROS HIALINOS$": "hialoc",
+        r"^CILINDROS GRANULOSOS$": "granuloc",
+        r"^C[EÉ]LULAS EPITELIALES$": "epiteloc",
+        r"^CRISTALES$": "cristaloc",
+        r"^LEVADURAS$": "levadoc",
+    },
+    "cultivo": {
+        # Puedes empezar simple con detectores de filas si luego extraes cultivos con otra lógica
+        # o mapear campos si vienen tabulados en texto.
+        r"^TINCION DE GRAM$": "gram",
+        r"^ANTIBIOGRAMA$": "ATB",
+        r"^MICROORGANISMO$": "agente",
+        r"^Muestra:$": "muestra",
+        # fechas de muestra/positividad las parsearemos con regex aparte
+    }
+}
+
+def detect_panel(text: str) -> str:
+    for panel, pats in SECTION_MARKERS.items():
+        for pat in pats:
+            if re.search(pat, text, flags=re.I):
+                return panel
+    return "resto"  # fallback
+
+def match_alias_in_panel(name: str, panel: str) -> str | None:
+    # Solo alias del panel actual:
+    for pat, std in ALIAS_BY_PANEL.get(panel, {}).items():
+        if re.search(pat, name, flags=re.I):
+            return std
+    # Si quieres, como última opción puedes intentar en “resto”,
+    # pero esto aumenta riesgo de choques. Yo recomiendo NO hacerlo.
+    if panel != "resto":
+        for pat, std in ALIAS_BY_PANEL["resto"].items():
+            if re.search(pat, name, flags=re.I):
+                return std
+    return None
 
 def canon_name(name: str):
     n = name.strip().lower()
@@ -329,12 +396,12 @@ def build_context(all_rows):
         dt = datetime.datetime.strptime(fecha, "%Y-%m-%d %H:%M")
         ctx[f"fecha_{i}"] = dt.strftime("%d/%m/%Y")
         ctx[f"hora_{i}"]  = dt.strftime("%H:%M")
-        for param in ALIASES.values():
+        for param in PARAMS_FIJOS:
             ctx[f"{param}_{i}"] = tandas[fecha].get(param, "")
     for i in range(len(fechas)+1, 9):
         ctx[f"fecha_{i}"] = ""
         ctx[f"hora_{i}"]  = ""
-        for param in ALIASES.values():
+        for param in PARAMS_FIJOS:
             ctx[f"{param}_{i}"] = ""
     return ctx
 
@@ -348,12 +415,10 @@ def index():
   <title>LabFluxHPH – Interfaz Mejorada</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;700&display=swap" rel="stylesheet">
-  <style>
-    body { font-family: 'Poppins', sans-serif; }
-  </style>
+  <style> body { font-family: 'Poppins', sans-serif; } </style>
 </head>
 <body class="bg-gray-100">
-  <!-- Barra superior azul con título y GIFs -->
+  <!-- Barra superior -->
   <header class="bg-blue-900 text-white py-4 flex items-center justify-center gap-6">
     <img src="/static/gatosaludando.gif" alt="decorativo izquierda" class="h-16 w-16">
     <h1 class="text-4xl font-bold">LabFluxHPH</h1>
@@ -366,19 +431,25 @@ def index():
       Sube 1 o más PDFs con resultados de laboratorio y recibe tu flujograma listo.
     </p>
 
-    <label id="dropzone"
-      class="block border-2 border-dashed border-gray-400 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-600 transition-all duration-300">
+    <!-- Input oculto (fuera del dropzone) -->
+    <input id="fileInput" type="file" multiple accept=".pdf,.zip" class="hidden" />
+    <!-- Dropzone (DIV, no LABEL) -->
+    <div id="dropzone"
+      class="border-2 border-dashed border-gray-400 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-600 transition-all duration-300">
       <div class="text-blue-400 text-5xl mb-4">📄</div>
       <div class="text-gray-600 font-semibold">Arrastra archivos aquí o haz clic para seleccionarlos</div>
-      <input id="fileInput" type="file" multiple accept=".pdf,.zip" class="hidden">
-    </label>
+      <button id="browseBtn" type="button"
+        class="mt-4 inline-flex items-center px-4 py-1.5 rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 transition">
+        Seleccionar archivos
+      </button>
+    </div>
 
     <div id="fileList" class="mt-4 flex flex-wrap gap-2"></div>
 
     <div class="mt-6 text-center space-y-3">
       <div id="status" class="text-gray-700 min-h-6"></div>
 
-      <!-- Contenedor de progreso -->
+      <!-- Progreso -->
       <div id="progressWrap" class="w-full bg-gray-200 rounded-full h-3 overflow-hidden hidden">
         <div id="progressBar" class="bg-blue-600 h-3 w-0 transition-all duration-150"></div>
       </div>
@@ -399,6 +470,7 @@ def index():
 
   <script>
     const dropzone = document.getElementById('dropzone');
+    const browseBtn = document.getElementById('browseBtn');
     const fileInput = document.getElementById('fileInput');
     const fileList = document.getElementById('fileList');
     const statusBox = document.getElementById('status');
@@ -424,8 +496,8 @@ def index():
       selectedFiles.forEach((file, idx) => {
         const tag = document.createElement('div');
         tag.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center gap-2';
-        tag.innerHTML = `${file.name} · ${(file.size/1024).toFixed(1)} KB 
-          <button aria-label="Eliminar" class="ml-1 text-red-600 hover:text-red-800" data-idx="${idx}">✕</button>`;
+        tag.innerHTML = \`\${file.name} · \${(file.size/1024).toFixed(1)} KB 
+          <button aria-label="Eliminar" class="ml-1 text-red-600 hover:text-red-800" data-idx="\${idx}">✕</button>\`;
         fileList.appendChild(tag);
       });
       fileList.querySelectorAll('button[data-idx]').forEach(btn => {
@@ -446,7 +518,6 @@ def index():
     }
 
     function showSpinner() {
-      // Añade el GIF sin borrar otros mensajes
       const exists = document.getElementById('spinner');
       if (!exists) {
         const img = document.createElement('img');
@@ -480,8 +551,14 @@ def index():
       progressText.textContent = '0%';
     }
 
-    // Click y drag&drop
+    // Abrir selector solo una vez
     dropzone.addEventListener('click', () => fileInput.click());
+    browseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      fileInput.click();
+    });
+
+    // Drag & drop
     dropzone.addEventListener('dragover', (e) => {
       e.preventDefault();
       dropzone.classList.add('border-blue-600');
@@ -491,88 +568,117 @@ def index():
       e.preventDefault();
       dropzone.classList.remove('border-blue-600');
       if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
+      fileInput.value = ''; // permite volver a elegir los mismos
     });
+
+    // Diálogo de archivos
     fileInput.addEventListener('change', (e) => {
       if (e.target.files?.length) addFiles(e.target.files);
+      fileInput.value = ''; // importantísimo: permite re-seleccionar mismos archivos
     });
 
     clearBtn.addEventListener('click', clearAll);
 
-    // Enviar con progreso real (XHR permite onprogress)
-    generateBtn.addEventListener('click', async () => {
-      if (!selectedFiles.length) {
-        statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
-        return;
+    // Envío con progreso real (upload -> procesando -> download)
+generateBtn.addEventListener('click', async () => {
+  if (!selectedFiles.length) {
+    statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
+    return;
+  }
+
+  generateBtn.disabled = true;
+  generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
+  showSpinner();
+  showProgress();
+
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append('files', f));
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/generate', true);
+  xhr.responseType = 'blob';
+  // xhr.setRequestHeader('x-api-key', 'TU_API_KEY'); // si usas API key
+
+  let downloadTotal = null;
+  let inDownload = false;
+
+  // 1) Progreso de SUBIDA real
+  xhr.upload.onprogress = (e) => {
+    if (e.lengthComputable) {
+      updateProgress((e.loaded / e.total) * 100);
+    }
+  };
+
+  // 2) Cuando termina la subida, entra fase "Procesando…"
+  xhr.upload.onload = () => {
+    statusBox.innerHTML = '<span class="text-gray-600">⏳ Procesando en el servidor…</span>';
+    // resetea barra a 0 para ahora medir DESCARGA real
+    updateProgress(0);
+  };
+
+  // 3) Progreso de DESCARGA real (usa Content-Length)
+  xhr.onprogress = (e) => {
+    // primera vez que llegan bytes ya estamos en descarga
+    inDownload = true;
+    if (downloadTotal === null) {
+      const h = xhr.getResponseHeader('Content-Length');
+      if (h) {
+        const parsed = parseInt(h, 10);
+        if (!isNaN(parsed) && parsed > 0) downloadTotal = parsed;
       }
+    }
+    if (downloadTotal && e.loaded) {
+      const pct = (e.loaded / downloadTotal) * 100;
+      updateProgress(pct);
+    } else {
+      // si no tenemos total, dejamos el spinner como referencia visual
+    }
+  };
 
-      // UI bloqueada + feedback
-      generateBtn.disabled = true;
-      generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
-      showSpinner();
-      showProgress();
+  // 4) Fin (éxito o error)
+  xhr.onload = () => {
+    hideSpinner();
+    generateBtn.disabled = false;
+    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
 
-      const fd = new FormData();
-      selectedFiles.forEach(f => fd.append('files', f));
+    if (xhr.status >= 200 && xhr.status < 300) {
+      // asegúrate que la barra terminó en 100% si tuvimos longitud
+      if (inDownload && downloadTotal) updateProgress(100);
 
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/generate', true);
-      xhr.responseType = 'blob';
+      const blob = xhr.response;
+      const fname = 'LabFluxHPH.docx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
 
-      // Si usas API key:
-      // xhr.setRequestHeader('x-api-key', 'TU_API_KEY');
+      statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
+    } else {
+      let msg = 'Error de servidor';
+      try {
+        const reader = new FileReader();
+        reader.onload = () => {
+          statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
+        };
+        reader.readAsText(xhr.response);
+      } catch {
+        statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
+      }
+    }
+    setTimeout(hideProgress, 500);
+  };
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          const percent = (e.loaded / e.total) * 100;
-          updateProgress(percent);
-        }
-      };
+  xhr.onerror = () => {
+    hideSpinner();
+    generateBtn.disabled = false;
+    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+    statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
+    hideProgress();
+  };
 
-      xhr.onload = () => {
-        hideSpinner();
-        generateBtn.disabled = false;
-        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
-
-        if (xhr.status >= 200 && xhr.status < 300) {
-          // Descarga automática
-          const blob = xhr.response;
-          // Intentar extraer nombre del header si estuviera disponible (no accesible directo con XHR cross env),
-          // usamos nombre por defecto:
-          const fname = 'LabFluxHPH.docx';
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = fname;
-          document.body.appendChild(a); a.click(); a.remove();
-          URL.revokeObjectURL(url);
-
-          statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
-        } else {
-          // Intentar leer mensaje de error como texto
-          let msg = 'Error de servidor';
-          try {
-            const reader = new FileReader();
-            reader.onload = () => {
-              statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
-            };
-            reader.readAsText(xhr.response);
-          } catch {
-            statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
-          }
-        }
-        // Ocultar barra tras un momento
-        setTimeout(hideProgress, 500);
-      };
-
-      xhr.onerror = () => {
-        hideSpinner();
-        generateBtn.disabled = false;
-        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
-        statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
-        hideProgress();
-      };
-
-      xhr.send(fd);
-    });
+  xhr.send(fd);
+});
   </script>
 </body>
 </html>
@@ -583,27 +689,27 @@ async def generate(files: list[UploadFile] = File(...)):
     if not files:
         raise HTTPException(400, "Sube al menos un PDF.")
 
-    all_rows = []
     pdf_bytes_list = extract_pdfs_from_uploads(files)
     if not pdf_bytes_list:
         raise HTTPException(400, "No se encontraron PDFs válidos.")
+
+    all_rows = []
     for content in pdf_bytes_list:
         all_rows.extend(parse_pdf(content))
 
     ctx = build_context(all_rows)
     docx_bytes = render_docx(ctx)
 
-    return StreamingResponse(
-        io.BytesIO(docx_bytes),
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.docx"'}
-    )
+    headers = {
+        "Content-Disposition": 'attachment; filename="LabFluxHPH.docx"',
+        "Content-Length": str(len(docx_bytes)),  # clave para progreso real de descarga
+        "Cache-Control": "no-cache",
+    }
 
-    # Fallback a DOCX si no hay conversión disponible
     return StreamingResponse(
         io.BytesIO(docx_bytes),
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        headers={"Content-Disposition": 'attachment; filename="LabFluxHPH.docx"'}
+        headers=headers,
     )
 
 @app.post("/generate_json")
