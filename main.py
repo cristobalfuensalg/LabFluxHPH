@@ -2,7 +2,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.responses import StreamingResponse, PlainTextResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import pdfplumber, io, re, datetime, tempfile, os, traceback, base64
+import pdfplumber, io, re, datetime, tempfile, os, traceback
 from docxtpl import DocxTemplate
 
 API_KEY = os.getenv("API_KEY", "")
@@ -293,48 +293,6 @@ def render_docx(ctx: dict) -> bytes:
         docx_bytes = f.read()
     os.remove(tmp_path)
     return docx_bytes
-
-def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
-    try:
-        from docx2pdf import convert as docx2pdf_convert
-        DOCX2PDF_AVAILABLE_LOCAL = True
-    except Exception:
-        DOCX2PDF_AVAILABLE_LOCAL = False
-
-    if DOCX2PDF_AVAILABLE_LOCAL:
-        try:
-            with tempfile.TemporaryDirectory() as td:
-                in_path = os.path.join(td, "out.docx")
-                out_path = os.path.join(td, "out.pdf")
-                with open(in_path, "wb") as f:
-                    f.write(docx_bytes)
-                docx2pdf_convert(in_path, out_path)
-                with open(out_path, "rb") as f:
-                    return f.read()
-        except Exception:
-            pass
-
-    possible_paths = [
-        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",
-        "/usr/bin/soffice",
-        "/usr/lib/libreoffice/program/soffice",
-        "/snap/bin/libreoffice",
-    ]
-    for soffice in possible_paths:
-        if os.path.exists(soffice):
-            try:
-                with tempfile.TemporaryDirectory() as td:
-                    in_path = os.path.join(td, "out.docx")
-                    with open(in_path, "wb") as f:
-                        f.write(docx_bytes)
-                    os.system(f"\"{soffice}\" --headless --convert-to pdf --outdir \"{td}\" \"{in_path}\"")
-                    out_path = os.path.join(td, "out.pdf")
-                    if os.path.exists(out_path):
-                        with open(out_path, "rb") as f:
-                            return f.read()
-            except Exception:
-                pass
-    return None
 
 @app.get("/health")
 def health():
