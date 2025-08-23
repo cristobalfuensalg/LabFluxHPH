@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import pdfplumber, io, re, datetime, tempfile, os, traceback
 from docxtpl import DocxTemplate
+import base64  # ✅ Paso 1: faltaba este import para /generate_json
 
 API_KEY = os.getenv("API_KEY", "")
 
@@ -45,6 +46,7 @@ PARAMS_FIJOS = [
     "fechacul", "horacul", "fechaposcul", "horaposcul", "muestra", "gram", "agente", "ATB"
 ]
 
+# Paso 2 (próximo): detección por panel por página. Por ahora dejamos los marcadores tal como están.
 SECTION_MARKERS = {
     "oc": [r"ORINA\s+COMPLETA\s*\(Incluye\s*SED\.U\)"],
     "cultivo": [r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b", r"\bANTIBIOGRAMA\b", r"\bGRAM\b"],
@@ -69,6 +71,7 @@ ALIAS_BY_PANEL = {
         r"^HEMOGLOBINA GLICOSILADA %$": "glicada",
         r"^COLESTEROL TOTAL$": "coltotal",
         r"^COLESTEROL HDL$": "hdl",
+        r"^COLESTEROL LDL$": "ldl",  # ✅ agregado
         r"^TRIGLIC[ÉE]RIDOS$": "tgl",
         r"^BUN$": "bun",
         r"^CREATININA$": "crea",
@@ -101,7 +104,7 @@ ALIAS_BY_PANEL = {
         r"^P CO2$": "pcodos",
         r"^P O2$": "podos",
         r"^HCO3$": "bicarb",
-        r"^EBVT$": "base",
+        r"^EBVT$": "base",        # Base Excess
         r"^PORCENTAJE$": "tp",
         r"^INR$": "inr",
         r"^TTPA$": "ttpk",
@@ -241,6 +244,10 @@ def parse_recepcion_datetime(text: str):
     return None
 
 def parse_pdf(file_bytes: bytes):
+    """
+    Paso 1: versión simple (por documento completo).
+    Paso 2: la convertiremos a 'por página' con panel/contexto independiente.
+    """
     rows = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
         text = "\n".join((p.extract_text() or "") for p in pdf.pages)
@@ -273,6 +280,7 @@ def parse_pdf(file_bytes: bytes):
             "nombre": name,
             "valor": value,
             "recepcion": recepcion,
+            "panel": panel
         })
 
     return rows
@@ -638,7 +646,11 @@ async def generate(files: list[UploadFile] = File(...)):
 
 
 @app.post("/generate_json")
-async def generate_json(files: list[UploadFile] = File(...)):
+async def generate_json(files: list[UploadFile] = File(...), debug: int = 0):
+    """
+    Si debug=1 -> devuelve filas parseadas y contexto (sin DOCX).
+    Si debug=0 -> devuelve el DOCX en base64 (uso normal).
+    """
     if not files:
         raise HTTPException(400, "Sube al menos un PDF.")
 
@@ -650,8 +662,15 @@ async def generate_json(files: list[UploadFile] = File(...)):
         all_rows.extend(parse_pdf(content))
 
     ctx = build_context(all_rows)
-    docx_bytes = render_docx(ctx)
+    if debug:
+        return {
+            "debug": 1,
+            "rows": all_rows,
+            "ctx": ctx,
+            "notes": "OK (solo debug, sin DOCX)"
+        }
 
+    docx_bytes = render_docx(ctx)
     data_b64 = base64.b64encode(docx_bytes).decode("ascii")
     return {
         "filename": "LabFluxHPH.docx",
