@@ -5,14 +5,14 @@ from fastapi.staticfiles import StaticFiles
 import pdfplumber, io, re, datetime, tempfile, os, traceback, base64
 from docxtpl import DocxTemplate
 
-API_KEY = os.getenv("API_KEY", "")  # opcional: setea en Render para proteger la API
+API_KEY = os.getenv("API_KEY", "")
 
 app = FastAPI(title="LabFluxHPH Backend")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # en producción, restringe a los dominios del hospital
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -32,29 +32,25 @@ async def all_exception_handler(request, exc):
 
 PARAMS_FIJOS = [
     "hto", "hb", "vcm", "hcm", "leuco", "neu", "linfocitos", "mono", "eosin", "basofilos",
-    "plaq", "vhs", "glucosa", "glicada", "coltotal", "hdl", "ldl", "tgl", "bun", "crea", "buncrea", "vfg", 
+    "plaq", "vhs", "glucosa", "glicada", "coltotal", "hdl", "ldl", "tgl", "bun", "crea", "buncrea", "vfg",
     "fosforo", "magnesio", "calcio", "calcioion", "acurico",
     "got", "gpt", "ggt", "fa", "bt", "bd",
     "amilasa", "proteinas", "albumina", "pcr", "lactico",
     "ldh", "ck", "ckmb", "tropo", "vitd", "vitb",
     "sodio", "potasio", "cloro", "ph", "pcodos", "podos", "bicarb", "base",
-    "tp", "inr", "ttpk", "coloroc", "aspectooc", "densoc", "phoc", "nitritosoc", "protoc", "cetonasoc",
+    "tp", "inr", "ttpk",
+    "coloroc", "aspectooc", "densoc", "phoc", "nitritosoc", "protoc", "cetonasoc",
     "glucosaoc", "urobiloc", "bilioc", "mucusoc", "leucosoc", "groc", "bactoc",
-    "hialoc", "granuloc", "epiteloc", "cristaloc", "levadoc", "fechacul", "horacul", "fechaposcul", "horaposcul", "muestra",
-    "gram", "agente", "ATB"
+    "hialoc", "granuloc", "epiteloc", "cristaloc", "levadoc",
+    "fechacul", "horacul", "fechaposcul", "horaposcul", "muestra", "gram", "agente", "ATB"
 ]
 
 SECTION_MARKERS = {
-    "oc": [
-        r"ORINA\s+COMPLETA\s*\(Incluye\s*SED\.U\)"
-    ],
-    "cultivo": [
-        r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b", r"\bANTIBIOGRAMA\b", r"\bGRAM\b"
-    ],
-    "resto": []  # fallback si no matchea oc ni cultivo
+    "oc": [r"ORINA\s+COMPLETA\s*\(Incluye\s*SED\.U\)"],
+    "cultivo": [r"\bCULTIVO\b", r"\bUROCULTIVO\b", r"\bHEMOCULTIVO\b", r"\bANTIBIOGRAMA\b", r"\bGRAM\b"],
+    "resto": []
 }
 
-# --- Alias por panel ---
 ALIAS_BY_PANEL = {
     "resto": {
         r"^HEMATOCRITO$": "hto",
@@ -109,8 +105,6 @@ ALIAS_BY_PANEL = {
         r"^PORCENTAJE$": "tp",
         r"^INR$": "inr",
         r"^TTPA$": "ttpk",
-        # aquí irían, si quieres, alias de “glóbulos rojos” del hemograma
-        # r"^(GL[ÓO]BULOS ROJOS|ERITROCITOS)$": "alguno_del_resto"
     },
     "oc": {
         r"^COLOR$": "coloroc",
@@ -134,13 +128,10 @@ ALIAS_BY_PANEL = {
         r"^LEVADURAS$": "levadoc",
     },
     "cultivo": {
-        # Puedes empezar simple con detectores de filas si luego extraes cultivos con otra lógica
-        # o mapear campos si vienen tabulados en texto.
         r"^TINCION DE GRAM$": "gram",
         r"^ANTIBIOGRAMA$": "ATB",
         r"^MICROORGANISMO$": "agente",
         r"^Muestra:$": "muestra",
-        # fechas de muestra/positividad las parsearemos con regex aparte
     }
 }
 
@@ -149,26 +140,16 @@ def detect_panel(text: str) -> str:
         for pat in pats:
             if re.search(pat, text, flags=re.I):
                 return panel
-    return "resto"  # fallback
+    return "resto"
 
 def match_alias_in_panel(name: str, panel: str) -> str | None:
-    # Solo alias del panel actual:
     for pat, std in ALIAS_BY_PANEL.get(panel, {}).items():
         if re.search(pat, name, flags=re.I):
             return std
-    # Si quieres, como última opción puedes intentar en “resto”,
-    # pero esto aumenta riesgo de choques. Yo recomiendo NO hacerlo.
     if panel != "resto":
         for pat, std in ALIAS_BY_PANEL["resto"].items():
             if re.search(pat, name, flags=re.I):
                 return std
-    return None
-
-def canon_name(name: str):
-    n = name.strip().lower()
-    for pat, std in ALIASES.items():
-        if re.search(pat, n, flags=re.I):
-            return std
     return None
 
 def format_value(std: str, value: str) -> str:
@@ -262,24 +243,27 @@ def parse_recepcion_datetime(text: str):
 def parse_pdf(file_bytes: bytes):
     rows = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
+        pages = [p.extract_text() or "" for p in pdf.pages]
+    text = "\n".join(pages)
 
     recepcion = parse_recepcion_datetime(text)
 
-    for line in text.splitlines():
-        m = re.search(r"^([A-Za-zÁ-ÿ0-9 \-*/+]+?)\s+([*+<>]?\s*[<>]?\d+[.,]?\d*)", line)
-        if not m:
-            continue
-        name = m.group(1).strip()
-        value = m.group(2).replace(",", ".").lstrip("*+<> ")
-        std = canon_name(name)
-        value = format_value(std, value)
-        rows.append({
-            "std": std,
-            "nombre": name,
-            "valor": value,
-            "recepcion": recepcion,
-        })
+    for page_text in pages:
+        panel = detect_panel(page_text)
+        for line in page_text.splitlines():
+            m = re.search(r"^([A-Za-zÁ-ÿ0-9 \-*/+.%]+?)\s+([*+<>]?\s*[<>]?\d+[.,]?\d*)", line)
+            if not m:
+                continue
+            name = m.group(1).strip()
+            value = m.group(2).replace(",", ".").lstrip("*+<> ")
+            std = match_alias_in_panel(name, panel)
+            value = format_value(std or "", value)
+            rows.append({
+                "std": std,
+                "nombre": name,
+                "valor": value,
+                "recepcion": recepcion,
+            })
     return rows
 
 def render_docx(ctx: dict) -> bytes:
@@ -288,7 +272,6 @@ def render_docx(ctx: dict) -> bytes:
     template_path = str(BASE_DIR / "flujograma_template.docx")
     if not os.path.exists(template_path):
         raise HTTPException(500, f"Falta flujograma_template.docx en {template_path}")
-
     doc = DocxTemplate(template_path)
     doc.render(ctx)
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
@@ -300,9 +283,8 @@ def render_docx(ctx: dict) -> bytes:
     return docx_bytes
 
 def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
-    # 1) Si hay Word en Windows y docx2pdf está disponible
     try:
-        from docx2pdf import convert as docx2pdf_convert  # por si no lo importaste arriba
+        from docx2pdf import convert as docx2pdf_convert
         DOCX2PDF_AVAILABLE_LOCAL = True
     except Exception:
         DOCX2PDF_AVAILABLE_LOCAL = False
@@ -318,14 +300,13 @@ def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
                 with open(out_path, "rb") as f:
                     return f.read()
         except Exception:
-            pass  # si falla, seguimos con LibreOffice
+            pass
 
-    # 2) LibreOffice (Windows o Linux)
     possible_paths = [
-        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",   # Windows
-        "/usr/bin/soffice",                                       # Linux (Render)
-        "/usr/lib/libreoffice/program/soffice",                   # Otra ruta Linux
-        "/snap/bin/libreoffice",                                  # Instalación vía Snap
+        r"C:\\Program Files\\LibreOffice\\program\\soffice.exe",
+        "/usr/bin/soffice",
+        "/usr/lib/libreoffice/program/soffice",
+        "/snap/bin/libreoffice",
     ]
     for soffice in possible_paths:
         if os.path.exists(soffice):
@@ -341,8 +322,6 @@ def convert_docx_to_pdf(docx_bytes: bytes) -> bytes:
                             return f.read()
             except Exception:
                 pass
-
-    # 3) Si no se pudo convertir, devolvemos None para que el endpoint haga fallback
     return None
 
 @app.get("/health")
@@ -350,10 +329,6 @@ def health():
     return {"ok": True}
 
 def extract_pdfs_from_uploads(files: list[UploadFile]) -> list[bytes]:
-    """
-    Recibe UploadFiles (PDFs o ZIPs).
-    Devuelve una lista de bytes de PDFs para procesar.
-    """
     import zipfile
     pdf_bytes_list = []
     for uf in files:
@@ -362,7 +337,6 @@ def extract_pdfs_from_uploads(files: list[UploadFile]) -> list[bytes]:
             continue
         filename = (uf.filename or "").lower()
         if filename.endswith(".zip"):
-            # Descomprimir y tomar PDFs
             with io.BytesIO(content) as bio:
                 with zipfile.ZipFile(bio) as zf:
                     for name in zf.namelist():
@@ -371,9 +345,6 @@ def extract_pdfs_from_uploads(files: list[UploadFile]) -> list[bytes]:
                                 pdf_bytes_list.append(zpdf.read())
         elif filename.endswith(".pdf"):
             pdf_bytes_list.append(content)
-        else:
-            # Ignora otros formatos
-            pass
     return pdf_bytes_list
 
 def build_context(all_rows):
@@ -418,22 +389,18 @@ def index():
   <style> body { font-family: 'Poppins', sans-serif; } </style>
 </head>
 <body class="bg-gray-100">
-  <!-- Barra superior -->
   <header class="bg-blue-900 text-white py-4 flex items-center justify-center gap-6">
     <img src="/static/gatosaludando.gif" alt="decorativo izquierda" class="h-16 w-16">
     <h1 class="text-4xl font-bold">LabFluxHPH</h1>
     <img src="/static/gatosaludando.gif" alt="decorativo derecha" class="h-16 w-16">
   </header>
 
-  <!-- Contenedor principal -->
   <div class="max-w-xl mx-auto mt-8 p-6 bg-white rounded-2xl shadow-lg transition-all">
     <p class="text-gray-700 text-center mb-6">
       Sube 1 o más PDFs con resultados de laboratorio y recibe tu flujograma listo.
     </p>
 
-    <!-- Input oculto (fuera del dropzone) -->
     <input id="fileInput" type="file" multiple accept=".pdf,.zip" class="hidden" />
-    <!-- Dropzone (DIV, no LABEL) -->
     <div id="dropzone"
       class="border-2 border-dashed border-gray-400 rounded-2xl p-12 text-center cursor-pointer hover:border-blue-600 transition-all duration-300">
       <div class="text-blue-400 text-5xl mb-4">📄</div>
@@ -449,7 +416,6 @@ def index():
     <div class="mt-6 text-center space-y-3">
       <div id="status" class="text-gray-700 min-h-6"></div>
 
-      <!-- Progreso -->
       <div id="progressWrap" class="w-full bg-gray-200 rounded-full h-3 overflow-hidden hidden">
         <div id="progressBar" class="bg-blue-600 h-3 w-0 transition-all duration-150"></div>
       </div>
@@ -496,8 +462,8 @@ def index():
       selectedFiles.forEach((file, idx) => {
         const tag = document.createElement('div');
         tag.className = 'bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-sm flex items-center gap-2';
-        tag.innerHTML = \`\${file.name} · \${(file.size/1024).toFixed(1)} KB 
-          <button aria-label="Eliminar" class="ml-1 text-red-600 hover:text-red-800" data-idx="\${idx}">✕</button>\`;
+        tag.innerHTML = `${file.name} · ${(file.size/1024).toFixed(1)} KB 
+  <button aria-label="Eliminar" class="ml-1 text-red-600 hover:text-red-800" data-idx="${idx}">✕</button>`;
         fileList.appendChild(tag);
       });
       fileList.querySelectorAll('button[data-idx]').forEach(btn => {
@@ -551,14 +517,12 @@ def index():
       progressText.textContent = '0%';
     }
 
-    // Abrir selector solo una vez
     dropzone.addEventListener('click', () => fileInput.click());
     browseBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       fileInput.click();
     });
 
-    // Drag & drop
     dropzone.addEventListener('dragover', (e) => {
       e.preventDefault();
       dropzone.classList.add('border-blue-600');
@@ -568,117 +532,103 @@ def index():
       e.preventDefault();
       dropzone.classList.remove('border-blue-600');
       if (e.dataTransfer?.files?.length) addFiles(e.dataTransfer.files);
-      fileInput.value = ''; // permite volver a elegir los mismos
+      fileInput.value = '';
     });
 
-    // Diálogo de archivos
     fileInput.addEventListener('change', (e) => {
       if (e.target.files?.length) addFiles(e.target.files);
-      fileInput.value = ''; // importantísimo: permite re-seleccionar mismos archivos
+      fileInput.value = '';
     });
 
     clearBtn.addEventListener('click', clearAll);
 
-    // Envío con progreso real (upload -> procesando -> download)
-generateBtn.addEventListener('click', async () => {
-  if (!selectedFiles.length) {
-    statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
-    return;
-  }
-
-  generateBtn.disabled = true;
-  generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
-  showSpinner();
-  showProgress();
-
-  const fd = new FormData();
-  selectedFiles.forEach(f => fd.append('files', f));
-
-  const xhr = new XMLHttpRequest();
-  xhr.open('POST', '/generate', true);
-  xhr.responseType = 'blob';
-  // xhr.setRequestHeader('x-api-key', 'TU_API_KEY'); // si usas API key
-
-  let downloadTotal = null;
-  let inDownload = false;
-
-  // 1) Progreso de SUBIDA real
-  xhr.upload.onprogress = (e) => {
-    if (e.lengthComputable) {
-      updateProgress((e.loaded / e.total) * 100);
-    }
-  };
-
-  // 2) Cuando termina la subida, entra fase "Procesando…"
-  xhr.upload.onload = () => {
-    statusBox.innerHTML = '<span class="text-gray-600">⏳ Procesando en el servidor…</span>';
-    // resetea barra a 0 para ahora medir DESCARGA real
-    updateProgress(0);
-  };
-
-  // 3) Progreso de DESCARGA real (usa Content-Length)
-  xhr.onprogress = (e) => {
-    // primera vez que llegan bytes ya estamos en descarga
-    inDownload = true;
-    if (downloadTotal === null) {
-      const h = xhr.getResponseHeader('Content-Length');
-      if (h) {
-        const parsed = parseInt(h, 10);
-        if (!isNaN(parsed) && parsed > 0) downloadTotal = parsed;
+    generateBtn.addEventListener('click', async () => {
+      if (!selectedFiles.length) {
+        statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
+        return;
       }
-    }
-    if (downloadTotal && e.loaded) {
-      const pct = (e.loaded / downloadTotal) * 100;
-      updateProgress(pct);
-    } else {
-      // si no tenemos total, dejamos el spinner como referencia visual
-    }
-  };
 
-  // 4) Fin (éxito o error)
-  xhr.onload = () => {
-    hideSpinner();
-    generateBtn.disabled = false;
-    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+      generateBtn.disabled = true;
+      generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
+      showSpinner();
+      showProgress();
 
-    if (xhr.status >= 200 && xhr.status < 300) {
-      // asegúrate que la barra terminó en 100% si tuvimos longitud
-      if (inDownload && downloadTotal) updateProgress(100);
+      const fd = new FormData();
+      selectedFiles.forEach(f => fd.append('files', f));
 
-      const blob = xhr.response;
-      const fname = 'LabFluxHPH.docx';
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = fname;
-      document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', '/generate', true);
+      xhr.responseType = 'blob';
 
-      statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
-    } else {
-      let msg = 'Error de servidor';
-      try {
-        const reader = new FileReader();
-        reader.onload = () => {
-          statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
-        };
-        reader.readAsText(xhr.response);
-      } catch {
-        statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
-      }
-    }
-    setTimeout(hideProgress, 500);
-  };
+      let downloadTotal = null;
+      let inDownload = false;
 
-  xhr.onerror = () => {
-    hideSpinner();
-    generateBtn.disabled = false;
-    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
-    statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
-    hideProgress();
-  };
+      xhr.upload.onprogress = (e) => {
+        if (e.lengthComputable) {
+          updateProgress((e.loaded / e.total) * 100);
+        }
+      };
 
-  xhr.send(fd);
-});
+      xhr.upload.onload = () => {
+        statusBox.innerHTML = '<span class="text-gray-600">⏳ Procesando en el servidor…</span>';
+        updateProgress(0);
+      };
+
+      xhr.onprogress = (e) => {
+        inDownload = true;
+        if (downloadTotal === null) {
+          const h = xhr.getResponseHeader('Content-Length');
+          if (h) {
+            const parsed = parseInt(h, 10);
+            if (!isNaN(parsed) && parsed > 0) downloadTotal = parsed;
+          }
+        }
+        if (downloadTotal && e.loaded) {
+          const pct = (e.loaded / downloadTotal) * 100;
+          updateProgress(pct);
+        }
+      };
+
+      xhr.onload = () => {
+        hideSpinner();
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+
+        if (xhr.status >= 200 && xhr.status < 300) {
+          if (inDownload && downloadTotal) updateProgress(100);
+          const blob = xhr.response;
+          const fname = 'LabFluxHPH.docx';
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url; a.download = fname;
+          document.body.appendChild(a); a.click(); a.remove();
+          URL.revokeObjectURL(url);
+          statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
+        } else {
+          let msg = 'Error de servidor';
+          try {
+            const reader = new FileReader();
+            reader.onload = () => {
+              statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
+            };
+            reader.readAsText(xhr.response);
+          } catch {
+            statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
+          }
+        }
+        setTimeout(hideProgress, 500);
+      };
+
+      xhr.onerror = () => {
+        hideSpinner();
+        generateBtn.disabled = false;
+        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+        statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
+        hideProgress();
+      };
+
+      xhr.send(fd);
+    });
   </script>
 </body>
 </html>
@@ -702,7 +652,7 @@ async def generate(files: list[UploadFile] = File(...)):
 
     headers = {
         "Content-Disposition": 'attachment; filename="LabFluxHPH.docx"',
-        "Content-Length": str(len(docx_bytes)),  # clave para progreso real de descarga
+        "Content-Length": str(len(docx_bytes)),
         "Cache-Control": "no-cache",
     }
 
@@ -733,15 +683,6 @@ async def generate_json(files: list[UploadFile] = File(...)):
         "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "data_base64": data_b64,
         "notes": "OK (DOCX)"
-    }
-
-    # Fallback a DOCX si no hay conversión disponible
-    data_b64 = base64.b64encode(docx_bytes).decode("ascii")
-    return {
-        "filename": "LabFluxHPH.docx",
-        "mime": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "data_base64": data_b64,
-        "notes": "No se pudo convertir a PDF; se entrega DOCX"
     }
 
 if __name__ == "__main__":
