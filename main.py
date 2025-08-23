@@ -243,28 +243,40 @@ def parse_recepcion_datetime(text: str):
 def parse_pdf(file_bytes: bytes):
     rows = []
     with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        pages = [p.extract_text() or "" for p in pdf.pages]
-    text = "\n".join(pages)
+        text = "\n".join((p.extract_text() or "") for p in pdf.pages)
 
     recepcion = parse_recepcion_datetime(text)
 
-    for page_text in pages:
-        panel = detect_panel(page_text)
-        for line in page_text.splitlines():
-            m = re.search(r"^([A-Za-zÁ-ÿ0-9 \-*/+.%]+?)\s+([*+<>]?\s*[<>]?\d+[.,]?\d*)", line)
-            if not m:
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        parts = re.split(r"\s{2,}", line)
+        if len(parts) < 2:
+            if ":" in line:
+                parts = [p.strip() for p in line.split(":", 1)]
+            else:
                 continue
-            name = m.group(1).strip()
-            value = m.group(2).replace(",", ".").lstrip("*+<> ")
-            std = match_alias_in_panel(name, panel)
-            value = format_value(std or "", value)
-            rows.append({
-                "std": std,
-                "nombre": name,
-                "valor": value,
-                "recepcion": recepcion,
-            })
+
+        name = parts[0].strip()
+        value = parts[1].strip()
+
+        value = value.replace(",", ".")
+
+        panel = detect_panel(text)
+	std = match_alias_in_panel(name, panel)
+        value = format_value(std, value)
+
+        rows.append({
+            "std": std,
+            "nombre": name,
+            "valor": value,
+            "recepcion": recepcion,
+        })
+
     return rows
+
 
 def render_docx(ctx: dict) -> bytes:
     from pathlib import Path
@@ -414,7 +426,10 @@ def index():
     <div id="fileList" class="mt-4 flex flex-wrap gap-2"></div>
 
     <div class="mt-6 text-center space-y-3">
-      <div id="status" class="text-gray-700 min-h-6"></div>
+      <div class="text-center space-y-2">
+  <img id="spinner" src="/static/loading.gif" alt="Cargando..." class="mx-auto h-8 hidden">
+  <div id="status" class="text-gray-700 min-h-6"></div>
+</div>
 
       <div id="progressWrap" class="w-full bg-gray-200 rounded-full h-3 overflow-hidden hidden">
         <div id="progressBar" class="bg-blue-600 h-3 w-0 transition-all duration-150"></div>
@@ -446,6 +461,9 @@ def index():
     const progressWrap = document.getElementById('progressWrap');
     const progressBar = document.getElementById('progressBar');
     const progressText = document.getElementById('progressText');
+    const spinner = document.getElementById('spinner');
+    function showSpinner() { spinner.classList.remove('hidden'); }
+    function hideSpinner() { spinner.classList.add('hidden'); }
 
     let selectedFiles = [];
 
@@ -543,92 +561,108 @@ def index():
     clearBtn.addEventListener('click', clearAll);
 
     generateBtn.addEventListener('click', async () => {
-      if (!selectedFiles.length) {
-        statusBox.innerHTML = '<span class="text-red-500">⚠ Selecciona al menos un archivo (PDF o ZIP).</span>';
-        return;
-      }
+  if (!selectedFiles.length) {
+    statusBox.textContent = '⚠ Selecciona al menos un archivo (PDF o ZIP).';
+    statusBox.className = 'text-red-500';
+    return;
+  }
 
-      generateBtn.disabled = true;
-      generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
-      showSpinner();
-      showProgress();
+  generateBtn.disabled = true;
+  generateBtn.classList.add('opacity-60', 'cursor-not-allowed');
+  statusBox.textContent = '';
+  statusBox.className = 'text-gray-700';
+  showSpinner();
+  showProgress();
 
-      const fd = new FormData();
-      selectedFiles.forEach(f => fd.append('files', f));
+  const UPLOAD_WEIGHT = 0.40;
+  const PROCESS_WEIGHT = 0.20;
+  const DOWNLOAD_WEIGHT = 0.40;
+  let processingTimer = null;
+  let processingProgress = 0;
 
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', '/generate', true);
-      xhr.responseType = 'blob';
+  function setOverallProgress(p) {
+    const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+    updateProgress(pct);
+  }
 
-      let downloadTotal = null;
-      let inDownload = false;
+  const fd = new FormData();
+  selectedFiles.forEach(f => fd.append('files', f));
 
-      xhr.upload.onprogress = (e) => {
-        if (e.lengthComputable) {
-          updateProgress((e.loaded / e.total) * 100);
-        }
-      };
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/generate', true);
+  xhr.responseType = 'blob';
 
-      xhr.upload.onload = () => {
-        statusBox.innerHTML = '<span class="text-gray-600">⏳ Procesando en el servidor…</span>';
-        updateProgress(0);
-      };
+  let downloadTotal = null;
+  let inDownload = false;
 
-      xhr.onprogress = (e) => {
-        inDownload = true;
-        if (downloadTotal === null) {
-          const h = xhr.getResponseHeader('Content-Length');
-          if (h) {
-            const parsed = parseInt(h, 10);
-            if (!isNaN(parsed) && parsed > 0) downloadTotal = parsed;
-          }
-        }
-        if (downloadTotal && e.loaded) {
-          const pct = (e.loaded / downloadTotal) * 100;
-          updateProgress(pct);
-        }
-      };
+  xhr.upload.onprogress = (e) => {
+    if (!e.lengthComputable) return;
+    const uploadPct = e.loaded / e.total;
+    setOverallProgress(UPLOAD_WEIGHT * uploadPct);
+  };
 
-      xhr.onload = () => {
-        hideSpinner();
-        generateBtn.disabled = false;
-        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+  xhr.upload.onload = () => {
+    const start = UPLOAD_WEIGHT;
+    const target = UPLOAD_WEIGHT + PROCESS_WEIGHT;
+    processingProgress = start;
+    if (processingTimer) clearInterval(processingTimer);
+    processingTimer = setInterval(() => {
+      processingProgress = Math.min(processingProgress + 0.01, target - 0.01);
+      setOverallProgress(processingProgress);
+    }, 120);
+  };
 
-        if (xhr.status >= 200 && xhr.status < 300) {
-          if (inDownload && downloadTotal) updateProgress(100);
-          const blob = xhr.response;
-          const fname = 'LabFluxHPH.docx';
-          const url = URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url; a.download = fname;
-          document.body.appendChild(a); a.click(); a.remove();
-          URL.revokeObjectURL(url);
-          statusBox.innerHTML = '<span class="text-green-600">✅ Flujograma generado. Revisa tu descarga.</span>';
-        } else {
-          let msg = 'Error de servidor';
-          try {
-            const reader = new FileReader();
-            reader.onload = () => {
-              statusBox.innerHTML = '<span class="text-red-500">❌ ' + (reader.result || msg) + '</span>';
-            };
-            reader.readAsText(xhr.response);
-          } catch {
-            statusBox.innerHTML = '<span class="text-red-500">❌ ' + msg + '</span>';
-          }
-        }
-        setTimeout(hideProgress, 500);
-      };
+  xhr.onprogress = (e) => {
+    inDownload = true;
+    if (processingTimer) { clearInterval(processingTimer); processingTimer = null; }
+    const h = xhr.getResponseHeader('Content-Length');
+    if (h && downloadTotal === null) {
+      const parsed = parseInt(h, 10);
+      if (!isNaN(parsed) && parsed > 0) downloadTotal = parsed;
+    }
+    if (downloadTotal && e.loaded) {
+      const downloadPct = e.loaded / downloadTotal;
+      const overall = UPLOAD_WEIGHT + PROCESS_WEIGHT + DOWNLOAD_WEIGHT * downloadPct;
+      setOverallProgress(overall);
+    }
+  };
 
-      xhr.onerror = () => {
-        hideSpinner();
-        generateBtn.disabled = false;
-        generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
-        statusBox.innerHTML = '<span class="text-red-500">❌ Error de red.</span>';
-        hideProgress();
-      };
+  xhr.onload = () => {
+    if (processingTimer) { clearInterval(processingTimer); processingTimer = null; }
+    hideSpinner();
+    generateBtn.disabled = false;
+    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
 
-      xhr.send(fd);
-    });
+    if (xhr.status >= 200 && xhr.status < 300) {
+      setOverallProgress(1);
+      const blob = xhr.response;
+      const fname = 'LabFluxHPH.docx';
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+      statusBox.textContent = '✅ Flujograma generado. Revisa tu descarga.';
+      statusBox.className = 'text-green-600';
+    } else {
+      statusBox.textContent = '❌ Error de servidor.';
+      statusBox.className = 'text-red-500';
+    }
+    setTimeout(hideProgress, 600);
+  };
+
+  xhr.onerror = () => {
+    if (processingTimer) { clearInterval(processingTimer); processingTimer = null; }
+    hideSpinner();
+    generateBtn.disabled = false;
+    generateBtn.classList.remove('opacity-60', 'cursor-not-allowed');
+    statusBox.textContent = '❌ Error de red.';
+    statusBox.className = 'text-red-500';
+    hideProgress();
+  };
+
+  xhr.send(fd);
+});
   </script>
 </body>
 </html>
