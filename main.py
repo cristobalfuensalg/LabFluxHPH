@@ -265,7 +265,7 @@ def parse_pdf(file_bytes: bytes):
         value = value.replace(",", ".")
 
         panel = detect_panel(text)
-	std = match_alias_in_panel(name, panel)
+    std = match_alias_in_panel(name, panel)
         value = format_value(std, value)
 
         rows.append({
